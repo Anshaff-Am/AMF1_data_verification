@@ -14,7 +14,8 @@ AMF1 Data Verification/
 │   ├── reference_document.csv   # Ground truth — 166 MB, gitignored
 │   └── ambiguities_report.txt   # Data model ambiguities for PM review
 └── scripts/
-    └── build_reference_doc.py   # Parses banner xlsx → reference_document.csv
+    ├── build_reference_doc.py       # Step 1: parses banner xlsx → reference_document.csv
+    └── build_ambiguity_report.py    # Step 2: reads csv → ambiguities_report.txt
 ```
 
 ## Setup
@@ -26,11 +27,15 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
+# Step 1 — build ground-truth CSV
 python scripts/build_reference_doc.py
+
+# Step 2 — generate ambiguities report (requires step 1 output)
+python scripts/build_ambiguity_report.py
 ```
 
-Reads `data/Wave1/Banner1-3.xlsx` and `data/Wave2/Banner1-3.xlsx`.  
-Outputs `outputs/reference_document.csv` (~850k rows) and `outputs/ambiguities_report.txt`.
+Step 1 reads `data/Wave1/Banner1-3.xlsx` and `data/Wave2/Banner1-3.xlsx`, outputs `outputs/reference_document.csv` (~850k rows).  
+Step 2 reads that CSV and outputs `outputs/ambiguities_report.txt`.
 
 ## Adding a new wave (Wave 3+)
 

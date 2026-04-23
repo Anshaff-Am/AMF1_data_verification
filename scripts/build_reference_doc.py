@@ -7,8 +7,7 @@ Extracts expected values for all in-scope dashboard questions at:
   - Total sample level
   - Each individual filter slice (country, age, gender, F1 fan, etc.)
 
-Outputs: reference_document.csv  (ground truth for Phase 1 verification)
-         ambiguities_report.txt   (questions/data points needing Suraen review)
+Output: outputs/reference_document.csv  (ground truth for Phase 1 verification)
 
 Usage: python scripts/build_reference_doc.py
 """
@@ -18,7 +17,6 @@ import re
 import sys
 import io
 from pathlib import Path
-from collections import defaultdict
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
@@ -45,8 +43,7 @@ FILES = {
     },
 }
 
-OUTPUT_CSV   = BASE_DIR / "outputs" / "reference_document.csv"
-AMBIG_REPORT = BASE_DIR / "outputs" / "ambiguities_report.txt"
+OUTPUT_CSV = BASE_DIR / "outputs" / "reference_document.csv"
 
 # ── In-scope / out-of-scope question filters ───────────────────────────────────
 # Match on the leading question code prefix (case-insensitive)
@@ -343,7 +340,6 @@ def parse_t1_sheet(ws, summary_map: dict):
 
 def main():
     records = []
-    question_coverage = defaultdict(set)   # qcode → set of (wave, banner)
     missing_files = []
 
     for wave, banners in FILES.items():
@@ -366,7 +362,6 @@ def main():
                 rec["wave"]   = wave
                 rec["banner"] = banner
                 records.append(rec)
-                question_coverage[rec["question_code"]].add((wave, banner))
                 batch += 1
 
             wb.close()
@@ -378,7 +373,6 @@ def main():
         print("No records extracted. Check file paths and in-scope filters.", file=sys.stderr)
         return
 
-    # ── Write CSV ──────────────────────────────────────────────────────────────
     fieldnames = [
         "wave", "banner", "table_num", "question_code", "question_text",
         "response_label", "filter_group", "filter_option", "col_letter",
@@ -390,132 +384,7 @@ def main():
         writer.writerows(records)
 
     print(f"\nReference document: {OUTPUT_CSV}", file=sys.stderr)
-
-    # ── Coverage summary ───────────────────────────────────────────────────────
-    found_codes  = set(question_coverage.keys())
-    expected     = IN_SCOPE_PREFIXES
-    missing_qs   = sorted(expected - found_codes)
-    extra_qs     = sorted(found_codes - expected)
-
-    print(f"\nQuestion codes found ({len(found_codes)}):", file=sys.stderr)
-    for code in sorted(found_codes):
-        waves = ", ".join(f"{w}/{b}" for w, b in sorted(question_coverage[code]))
-        print(f"  {code}: {waves}", file=sys.stderr)
-
-    # ── Ambiguities report ─────────────────────────────────────────────────────
-    ambig_lines = [
-        "AMF1 Partner Survey Dashboard — Phase 0 Ambiguities Report",
-        "=" * 65,
-        f"Generated from: {len(records)} records across 6 banner files",
-        "",
-    ]
-
-    if missing_files:
-        ambig_lines += ["MISSING FILES:", *[f"  {f}" for f in missing_files], ""]
-
-    if missing_qs:
-        ambig_lines += [
-            "IN-SCOPE QUESTIONS WITH NO DATA FOUND:",
-            "(These questions may not exist in Wave 1, or may use different question codes)",
-            *[f"  {q}" for q in missing_qs],
-            "",
-        ]
-
-    # Detect W1-only / W2-only questions
-    w1_only = {c for c, waves in question_coverage.items()
-               if all(w == "W1" for w, _ in waves)}
-    w2_only = {c for c, waves in question_coverage.items()
-               if all(w == "W2" for w, _ in waves)}
-
-    if w1_only:
-        ambig_lines += [
-            "WAVE 1 ONLY QUESTIONS (not found in Wave 2 data):",
-            *[f"  {q}" for q in sorted(w1_only)],
-            "",
-        ]
-    if w2_only:
-        ambig_lines += [
-            "WAVE 2 ONLY QUESTIONS (not found in Wave 1 data):",
-            "(Dashboard should show N/A for these in Wave 1 context)",
-            *[f"  {q}" for q in sorted(w2_only)],
-            "",
-        ]
-
-    # Known structural ambiguities identified during Phase 0 exploration
-    ambig_lines += [
-        "KNOWN DATA MODEL AMBIGUITIES — NEEDS SURAEN REVIEW:",
-        "-" * 50,
-        "",
-        "1. D6 DUAL TABLE",
-        "   Wave 1 has Table 200 (D6 Total Sample) AND Table 201 (D6 D6-aware base).",
-        "   Dashboard base for D6 is listed as 'All aware of >1 brand at D1'.",
-        "   QUESTION: Which table does the dashboard use as its source?",
-        "   Does it filter to respondents aware of at least one D1 brand?",
-        "",
-        "2. D14/D15/D16 BRANDS IN TABLES vs DASHBOARD PARTNER PAGES",
-        "   Global tables include D14/D15/D16 for brands NOT on the 14 partner pages",
-        "   (e.g. Citi, Regent Seven Seas Cruises, NetApp, Xerox, ARM, Elemis, Public,",
-        "   The Financial Times). Dashboard only has 14 partner pages.",
-        "   QUESTION: Are these extra brands displayed anywhere in the dashboard?",
-        "   Or are they excluded from the dashboard entirely?",
-        "",
-        "3. D1 AWARENESS — 31 TRACKED BRANDS vs 18 PARTNER BRANDS",
-        "   The D1 question tracks 31+ brands (including non-partner brands like Pirelli,",
-        "   Puma, Bombardier, Oakley, Stilo, etc.). Dashboard Overview shows all brands.",
-        "   PRD says 'D1 Brand Awareness (SUM of D1_1r + D1_2r per brand)'.",
-        "   QUESTION: The global tables show D1 as a single question (spontaneous +",
-        "   prompted combined). Is there a D1_1r / D1_2r split in the raw data that",
-        "   doesn't appear in these pre-aggregated banner tables?",
-        "",
-        "4. W1 PARTNER-SPECIFIC QUESTIONS AVAILABILITY",
-        "   Wave 1 banner files (tables 1-855) do NOT appear to contain:",
-        "   B2a, B5, B7, MAA1-8, ATL1-2, TTK1-7.",
-        "   These are found in Wave 2 only (or at very different table numbers in W1).",
-        "   QUESTION: Were these questions added in Wave 2? How should the dashboard",
-        "   display these for Wave 1? Show N/A, or are they present in W1 elsewhere?",
-        "",
-        "5. FILTER MAPPING: F1 FAN 'AVID' OPTION",
-        "   PRD defines F1 Fan filter as: Yes (A3 opt 4/5), Avid (A3 opt 5 only),",
-        "   Non-fans (A3 opt 1/2/3).",
-        "   Banner 2 has 'F1 Fans' (=Yes) and 'Non-F1 Fans' but no explicit 'Avid' column.",
-        "   W2 Banner2 has 'F1 2025 Followers' which may correspond to 'Avid'.",
-        "   QUESTION: Does 'F1 2025 Followers' = 'Avid F1 Fan' filter in the dashboard?",
-        "",
-        "6. TEAM FAN FILTER",
-        "   PRD lists Team Fan as a multi-select filter with 10 F1 teams.",
-        "   No dedicated per-team fan columns found in the banner tables.",
-        "   QUESTION: How is the Team Fan filter implemented? Are team-fan segments",
-        "   built from C2 (team support) question responses in the raw SPSS data?",
-        "   If so, these values won't be in the pre-aggregated banner tables.",
-        "",
-        "7. DEMOGRAPHIC FILTERS: MEN UNDER 35, WOMEN 35-54, ETC.",
-        "   PRD lists detailed demographic sub-segments (Men Under 35, Men 35-54, Men 55+,",
-        "   Women Under 35, Women 35-54, Women 55+).",
-        "   Not clearly mapped to specific banner columns.",
-        "   QUESTION: Which specific banner columns correspond to these sub-segments?",
-        "",
-        "8. TECH ADOPTERS (D17a OPT 1) — WAVE 2 ONLY",
-        "   PRD lists Tech Adopters as a Demographic filter option.",
-        "   Banner 1 Wave 2 has this as a 'Students > F1 Fans' subsegment perhaps.",
-        "   QUESTION: Is Tech Adopters a Wave 2 only filter? Should it be hidden in W1?",
-        "",
-        "9. CON7 EXCHANGE PREFERENCE",
-        "   PRD shows CON7 as 'Which cryptocurrency exchange are you most likely to use?'",
-        "   as a horizontal bar chart. Table 479 in W1 only shows Coinbase as a brand.",
-        "   QUESTION: Does CON7 show all exchanges (like CON6) or just Coinbase brand row?",
-        "",
-        "10. D3a vs D3b SPLIT",
-        "    PRD shows D3a (Currently own/use) and D3b (Consider using) as separate charts.",
-        "    In global tables, these are rows within a single D3 table per brand.",
-        "    Both rows ('Currently use/own' and 'Consider using/owning') are captured",
-        "    in the reference document — verify exact row label wording matches dashboard.",
-        "",
-    ]
-
-    with open(str(AMBIG_REPORT), "w", encoding="utf-8") as f:
-        f.write("\n".join(ambig_lines))
-
-    print(f"Ambiguities report: {AMBIG_REPORT}", file=sys.stderr)
+    print("Run 'python scripts/build_ambiguity_report.py' to regenerate ambiguities report.", file=sys.stderr)
 
 
 if __name__ == "__main__":
